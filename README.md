@@ -37,85 +37,238 @@ git clone https://github.com/yourusername/nat-traversal.git
 cd nat-traversal
 ```
 
-2. **编译项目**：
-```bash
-# Linux 本地编译
-cargo build --release
+2. **安装编译依赖**：
 
-# Windows 交叉编译 (在 Linux 下)
+**Linux (Ubuntu/Debian)**：
+```bash
+# 安装 Rust (如果未安装)
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+source ~/.bashrc
+
+# 安装 GUI 依赖（可选，仅 GUI 版本需要）
+sudo apt update
+sudo apt install -y libgtk-3-dev libatk1.0-dev libcairo-gobject2 \
+  libcairo2-dev libgdk-pixbuf2.0-dev libgio2.0-cil-dev \
+  libglib2.0-dev libpango1.0-dev pkg-config
+
+# 安装 Windows 交叉编译工具（可选）
 sudo apt install gcc-mingw-w64-x86-64
 rustup target add x86_64-pc-windows-gnu
-cargo build --target x86_64-pc-windows-gnu --release
-
-# 仅命令行版本 (无 GUI 依赖)
-cargo build -p nat-traversal-client --no-default-features --release
 ```
 
-### 服务器端配置
+**Windows**：
+```powershell
+# 安装 Rust (如果未安装)
+# 从 https://rustup.rs/ 下载并运行安装程序
 
-1. **生成配置文件**：
+# 无需额外系统依赖，所有功能使用纯 Rust 实现
+```
+
+3. **编译项目**：
+```bash
+# Linux 本地编译（包含 GUI）
+cargo build --release
+
+# Linux 编译无 GUI 版本
+cargo build -p nat-traversal-client --no-default-features --release
+
+# Windows 交叉编译（在 Linux 下）
+cargo build --target x86_64-pc-windows-gnu --release
+
+# Windows 本地编译（在 Windows 下）
+cargo build --release
+```
+
+## 详细使用步骤
+
+### 第一步：服务器端部署
+
+#### 1.1 生成配置文件
 ```bash
 # Linux
 ./target/release/nat-server --generate-config
 
 # Windows
 ./target/x86_64-pc-windows-gnu/release/nat-server.exe --generate-config
+# 或者在 Windows 本地编译后
+./target/release/nat-server.exe --generate-config
 ```
 
-2. **生成 TLS 证书** (测试环境):
+**配置文件位置**：
+- Linux: `~/.config/nat-traversal/server.toml`
+- Windows: `%APPDATA%\nat-traversal\nat-traversal\server.toml`
+
+#### 1.2 生成 TLS 证书
+
+**自签名证书（测试环境）**：
 ```bash
+# Linux
+cd ~/.config/nat-traversal/
 openssl genrsa -out server.key 4096
-openssl req -new -x509 -key server.key -out server.crt -days 365 \ -subj "/C=US/ST=State/L=City/O=Organization/OU=Unit/CN=localhost"
+openssl req -new -x509 -key server.key -out server.crt -days 365 \
+  -subj "/C=CN/ST=State/L=City/O=Organization/OU=Unit/CN=your-server.com"
+
+# Windows（在配置目录中）
+cd %APPDATA%\nat-traversal\nat-traversal\
+openssl genrsa -out server.key 4096
+openssl req -new -x509 -key server.key -out server.crt -days 365 -subj "/C=CN/ST=State/L=City/O=Organization/OU=Unit/CN=your-server.com"
 ```
 
-3. **编辑配置文件** `~/.config/nat-traversal/server.toml`:
+**生产环境证书**：
+使用 Let's Encrypt 或购买 SSL 证书，将证书文件放到配置目录。
+
+#### 1.3 编辑服务器配置文件
+
+编辑 `server.toml`：
 ```toml
 [network]
-bind_addr = "0.0.0.0"
-port = 7000
-max_connections = 1000
+bind_addr = "0.0.0.0"          # 监听所有网络接口
+port = 7000                    # 服务端口
+max_connections = 1000         # 最大连接数
 
 [tls]
-cert_path = "/path/to/server.crt"
-key_path = "/path/to/server.key"
+# Linux 路径示例
+cert_path = "/home/user/.config/nat-traversal/server.crt"
+key_path = "/home/user/.config/nat-traversal/server.key"
+# Windows 路径示例
+# cert_path = "C:\\Users\\username\\AppData\\Roaming\\nat-traversal\\nat-traversal\\server.crt"
+# key_path = "C:\\Users\\username\\AppData\\Roaming\\nat-traversal\\nat-traversal\\server.key"
 verify_client = false
 
 [auth]
-tokens = ["your-secret-token"]
+tokens = ["your-secret-token-here"]  # 修改为强密码
 require_auth = true
 max_clients_per_token = 10
+
+[limits]
+max_tunnels_per_client = 10
+max_connections_per_tunnel = 100
+connection_timeout_secs = 300
+
+[logging]
+level = "info"
+max_size_mb = 100
+max_files = 5
 ```
 
-4. **启动服务器**：
+#### 1.4 启动服务器
 ```bash
 # Linux
 ./target/release/nat-server
 
 # Windows
 ./target/x86_64-pc-windows-gnu/release/nat-server.exe
+# 或者在 Windows 本地编译后
+./target/release/nat-server.exe
+
+# 后台运行（Linux）
+nohup ./target/release/nat-server > server.log 2>&1 &
+
+# 使用 systemd 服务（Linux）
+sudo cp nat-server.service /etc/systemd/system/
+sudo systemctl enable nat-server
+sudo systemctl start nat-server
 ```
 
-### 客户端配置
+### 第二步：客户端配置
 
-1. **生成配置文件**：
+#### 2.1 生成配置文件
 ```bash
 # Linux
 ./target/release/nat-client --generate-config
 
 # Windows
 ./target/x86_64-pc-windows-gnu/release/nat-client.exe --generate-config
+# 或者在 Windows 本地编译后
+./target/release/nat-client.exe --generate-config
 ```
 
-2. **编辑配置文件** `~/.config/nat-traversal/client.toml`:
+**配置文件位置**：
+- Linux: `~/.config/nat-traversal/client.toml`
+- Windows: `%APPDATA%\nat-traversal\nat-traversal\client.toml`
+
+#### 2.2 编辑客户端配置文件
+
+编辑 `client.toml`：
 ```toml
 [server]
-addr = "your-server.com"
-port = 7000
-token = "your-secret-token"
-client_id = "my-client"
-auto_reconnect = true
-tls_verify = true
+addr = "your-server.com"       # 服务器公网 IP 或域名
+port = 7000                    # 服务器端口
+token = "your-secret-token-here"  # 与服务器配置一致
+client_id = "my-desktop"       # 客户端唯一标识
+auto_reconnect = true          # 自动重连
+reconnect_interval_secs = 30   # 重连间隔
+tls_verify = true             # 验证 TLS 证书（生产环境建议开启）
 
+[gui]
+enabled = true                # 启用图形界面
+start_minimized = false       # 启动时最小化
+system_tray = true           # 显示系统托盘图标
+theme = "dark"               # 界面主题
+
+[logging]
+level = "info"               # 日志级别
+max_size_mb = 50            # 最大日志文件大小
+max_files = 3               # 保留日志文件数量
+
+# 隧道配置将通过 GUI 管理，或手动添加：
+[[tunnels]]
+name = "SSH Server"          # 隧道名称
+local_port = 22             # 本地端口
+remote_port = 2222          # 远程端口（可选，不指定则自动分配）
+protocol = "Tcp"            # 协议类型
+auto_start = true           # 启动时自动连接
+```
+
+#### 2.3 启动客户端
+
+**GUI 模式**：
+```bash
+# Linux
+./target/release/nat-client
+
+# Windows
+./target/x86_64-pc-windows-gnu/release/nat-client.exe
+# 或者在 Windows 本地编译后
+./target/release/nat-client.exe
+```
+
+**命令行模式**：
+```bash
+# Linux
+./target/release/nat-client --no-gui
+
+# Windows
+./target/x86_64-pc-windows-gnu/release/nat-client.exe --no-gui
+```
+
+**调试模式**：
+```bash
+# 启用详细日志
+RUST_LOG=debug ./target/release/nat-client
+
+# Windows PowerShell
+$env:RUST_LOG="debug"; ./target/release/nat-client.exe
+```
+
+### 第三步：隧道管理
+
+#### 3.1 使用 GUI 管理隧道
+
+1. 启动 GUI 客户端
+2. 在"连接配置"标签页确认服务器设置
+3. 点击"连接服务器"建立连接
+4. 在"隧道管理"标签页添加新隧道：
+   - 隧道名称：例如 "SSH"
+   - 本地端口：例如 22
+   - 远程端口：例如 2222（可选）
+   - 协议：TCP
+5. 点击"启动隧道"
+
+#### 3.2 常用隧道配置示例
+
+**SSH 远程连接**：
+```toml
 [[tunnels]]
 name = "SSH"
 local_port = 22
@@ -124,13 +277,175 @@ protocol = "Tcp"
 auto_start = true
 ```
 
-3. **启动客户端**：
-```bash
-# GUI 模式
-./target/release/nat-client
+**Web 服务器**：
+```toml
+[[tunnels]]
+name = "Web Server"
+local_port = 8080
+# remote_port 不指定，系统自动分配
+protocol = "Tcp"
+auto_start = false
+```
 
-# 命令行模式
-./target/release/nat-client --no-gui
+**远程桌面（Windows）**：
+```toml
+[[tunnels]]
+name = "RDP"
+local_port = 3389
+remote_port = 13389
+protocol = "Tcp"
+auto_start = true
+```
+
+**数据库连接**：
+```toml
+[[tunnels]]
+name = "MySQL"
+local_port = 3306
+remote_port = 13306
+protocol = "Tcp"
+auto_start = false
+```
+
+### 第四步：连接测试
+
+#### 4.1 测试隧道连接
+
+**SSH 连接测试**：
+```bash
+# 通过隧道连接到本地机器
+ssh user@your-server.com -p 2222
+```
+
+**Web 服务测试**：
+```bash
+# 假设系统分配了端口 18080
+curl http://your-server.com:18080
+```
+
+**端口连通性测试**：
+```bash
+# Linux/Mac
+telnet your-server.com 2222
+
+# Windows
+Test-NetConnection your-server.com -Port 2222
+```
+
+#### 4.2 状态监控
+
+**查看服务器日志**：
+```bash
+# 实时查看日志
+tail -f ~/.config/nat-traversal/server.log
+
+# 检查错误
+grep ERROR ~/.config/nat-traversal/server.log
+```
+
+**查看客户端状态**：
+- GUI 模式：在状态栏查看连接状态
+- CLI 模式：查看控制台输出
+- 日志文件：`~/.config/nat-traversal/client.log`
+
+### 第五步：生产部署
+
+#### 5.1 服务器端生产配置
+
+**使用 systemd 服务（Linux）**：
+```bash
+# 创建服务文件
+sudo tee /etc/systemd/system/nat-server.service > /dev/null <<EOF
+[Unit]
+Description=NAT Traversal Server
+After=network.target
+
+[Service]
+Type=simple
+User=nat-server
+WorkingDirectory=/opt/nat-traversal
+ExecStart=/opt/nat-traversal/nat-server
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# 启用并启动服务
+sudo systemctl enable nat-server
+sudo systemctl start nat-server
+sudo systemctl status nat-server
+```
+
+**防火墙配置**：
+```bash
+# UFW (Ubuntu)
+sudo ufw allow 7000/tcp
+
+# firewalld (CentOS/RHEL)
+sudo firewall-cmd --permanent --add-port=7000/tcp
+sudo firewall-cmd --reload
+
+# iptables
+sudo iptables -A INPUT -p tcp --dport 7000 -j ACCEPT
+```
+
+#### 5.2 客户端自动启动
+
+**Windows 服务安装**：
+```powershell
+# 使用 NSSM (Non-Sucking Service Manager)
+nssm install "NAT Traversal Client" "C:\path\to\nat-client.exe"
+nssm set "NAT Traversal Client" Parameters "--no-gui"
+nssm start "NAT Traversal Client"
+```
+
+**Linux systemd 用户服务**：
+```bash
+# 创建用户服务文件
+mkdir -p ~/.config/systemd/user
+cat > ~/.config/systemd/user/nat-client.service <<EOF
+[Unit]
+Description=NAT Traversal Client
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/nat-client --no-gui
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+EOF
+
+# 启用用户服务
+systemctl --user enable nat-client
+systemctl --user start nat-client
+```
+
+### 故障排除快速指南
+
+**连接失败**：
+1. 检查网络连通性：`telnet server-ip 7000`
+2. 验证证书配置：`openssl s_client -connect server-ip:7000`
+3. 检查防火墙设置
+4. 确认认证令牌正确
+
+**性能问题**：
+1. 检查服务器资源使用：`htop`、`iotop`
+2. 调整连接限制配置
+3. 监控网络带宽使用
+
+**日志分析**：
+```bash
+# 启用调试日志
+RUST_LOG=debug ./nat-server
+RUST_LOG=debug ./nat-client --no-gui
+
+# 查看特定模块日志
+RUST_LOG=nat_traversal_server::tunnel=debug ./nat-server
 ```
 
 ## 配置文件详解
