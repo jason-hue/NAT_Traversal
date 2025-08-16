@@ -65,8 +65,7 @@ cargo build -p nat-traversal-client --no-default-features --release
 2. **生成 TLS 证书** (测试环境):
 ```bash
 openssl genrsa -out server.key 4096
-openssl req -new -x509 -key server.key -out server.crt -days 365 \
-  -subj "/C=US/ST=State/L=City/O=Organization/OU=Unit/CN=localhost"
+openssl req -new -x509 -key server.key -out server.crt -days 365 \ -subj "/C=US/ST=State/L=City/O=Organization/OU=Unit/CN=localhost"
 ```
 
 3. **编辑配置文件** `~/.config/nat-traversal/server.toml`:
