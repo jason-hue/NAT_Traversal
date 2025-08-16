@@ -1,0 +1,55 @@
+[package]
+name = "nat-traversal-client"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[features]
+default = ["gui"]
+gui = ["egui", "eframe", "rfd"]
+
+[[bin]]
+name = "nat-client"
+path = "src/main.rs"
+
+[dependencies]
+nat-traversal-common = { path = "../common" }
+
+# Core dependencies
+tokio = { workspace = true }
+tokio-util = { workspace = true }
+tokio-rustls = { workspace = true }
+rustls = { workspace = true }
+
+# GUI dependencies (optional)
+egui = { workspace = true, optional = true }
+eframe = { workspace = true, optional = true }
+rfd = { workspace = true, optional = true }
+
+# Serialization and config
+serde = { workspace = true }
+serde_json = { workspace = true }
+toml = { workspace = true }
+
+# Error handling and logging
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = "0.2"
+
+# TLS and networking
+rustls-pemfile = { workspace = true }
+webpki-roots = "0.25"
+
+# CLI and utilities
+clap = { workspace = true }
+directories = { workspace = true }
+uuid = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
+
+# Platform-specific dependencies
+[target.'cfg(windows)'.dependencies]
+winapi = { workspace = true }
