@@ -62,7 +62,7 @@ rfd = "0.12"
 # winapi = { version = "0.3", features = ["winuser", "winsvc"] }
 # windows-service = "0.6"
 # nix = "0.27"
-winapi = { version = "0.3", features = ["winuser", "winsvc"] }
+winapi = { version = "0.3", features = ["winuser", "winsvc", "processthreadsapi", "securitybaseapi", "winnt", "handleapi"] }
 windows-service = "0.6"
 nix = "0.27"
 libc = "0.2"

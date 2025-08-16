@@ -1,7 +1,7 @@
 #[cfg(windows)]
 use crate::service::{ServiceConfig, ServiceManager};
 #[cfg(windows)]
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 #[cfg(windows)]
 use std::ffi::OsString;
 #[cfg(windows)]
@@ -35,7 +35,7 @@ impl ServiceManager for WindowsServiceManager {
             start_type: ServiceStartType::AutoStart,
             error_control: ServiceErrorControl::Normal,
             executable_path: config.executable_path.clone(),
-            launch_arguments: config.arguments.clone(),
+            launch_arguments: config.arguments.iter().map(|s| OsString::from(s)).collect(),
             dependencies: vec![],
             account_name: config.user.as_ref().map(|u| OsString::from(u)),
             account_password: None,
