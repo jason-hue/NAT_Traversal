@@ -1,0 +1,42 @@
+# Rust
+/target
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Configuration files with sensitive data
+*.key
+*.crt
+*.pem
+config.toml
+server.toml
+client.toml
+
+# Build artifacts
+/dist
+/build
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# Platform specific
+*.exe
+*.dll
+*.so
+*.dylib
