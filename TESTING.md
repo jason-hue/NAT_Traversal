@@ -204,6 +204,97 @@ cargo run --bin nat-client
 - 生产环境需要有效TLS证书
 - 客户端需要配置证书验证
 
+### 7. WSL + Windows 部署测试
+
+#### 环境配置测试
+```bash
+# 运行自动化部署脚本
+./wsl-deploy.sh
+```
+
+**验证步骤**:
+1. ✅ WSL IP 地址自动检测
+2. ✅ 服务器配置绑定到 WSL IP
+3. ✅ TLS 证书包含 WSL IP
+4. ✅ Windows 客户端自动编译
+5. ✅ 配置文件自动同步
+
+#### 连接测试
+```bash
+# 启动 WSL 服务器
+./target/release/nat-server &
+
+# 测试本地连接
+timeout 10s cargo run --bin nat-client -- --no-gui
+```
+
+**验证结果**:
+- ✅ TLS 握手成功
+- ✅ 客户端认证通过
+- ✅ 连接状态正常
+- ✅ 自动重连机制工作
+
+#### Windows 客户端测试
+**部署位置**: `C:\NAT-Traversal\`
+**文件清单**:
+- ✅ `nat-client.exe` (20MB)
+- ✅ `client.toml` (配置文件)
+- ✅ `start-gui.bat` (GUI 启动脚本)
+- ✅ `start-cli.bat` (CLI 启动脚本)
+
+### 8. TLS 证书兼容性测试
+
+#### 证书验证测试
+```bash
+# 验证证书有效性
+openssl x509 -in server.crt -text -noout
+
+# 测试 TLS 连接
+openssl s_client -connect 172.22.247.72:7000
+```
+
+**结果**:
+- ✅ RSA 2048位密钥
+- ✅ SHA256 签名算法
+- ✅ Subject Alternative Names 包含 WSL IP
+- ✅ 客户端 TLS 验证禁用功能正常
+
+#### 开发环境 TLS 配置
+- ✅ `tls_verify = false` 正确禁用证书验证
+- ✅ `dangerous_configuration` 特性启用成功
+- ✅ 自定义证书验证器工作正常
+
+## 部署验证工具
+
+### 自动化验证脚本
+```bash
+# 运行完整部署验证
+./verify-deployment.sh
+```
+
+**验证项目**:
+- ✅ 系统依赖检查
+- ✅ 编译工具验证  
+- ✅ 项目结构完整性
+- ✅ 编译过程验证
+- ✅ 配置生成测试
+- ✅ 证书生成测试
+- ✅ WSL 环境检测
+- ✅ 网络配置检查
+
+### WSL 部署自动化
+```bash
+# 一键部署 WSL + Windows 环境
+./wsl-deploy.sh
+```
+
+**自动化内容**:
+- ✅ WSL IP 自动检测和配置
+- ✅ 安全 token 自动生成
+- ✅ TLS 证书自动生成
+- ✅ Windows 客户端自动部署
+- ✅ 启动脚本自动创建
+
 ## 测试命令总结
 
 ```bash

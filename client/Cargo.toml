@@ -20,7 +20,7 @@ nat-traversal-common = { path = "../common" }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 tokio-rustls = { workspace = true }
-rustls = { workspace = true }
+rustls = { workspace = true, features = ["dangerous_configuration"] }
 
 # GUI dependencies (optional)
 egui = { workspace = true, optional = true }

@@ -60,10 +60,9 @@ impl ServerConnection {
     }
 
     async fn setup_tls(config: &ClientConfig) -> NatResult<TlsConnector> {
-        let mut root_cert_store = rustls::RootCertStore::empty();
-
-        if config.server.tls_verify {
-            // Add system certificates
+        let tls_config = if config.server.tls_verify {
+            // Use standard certificate verification
+            let mut root_cert_store = rustls::RootCertStore::empty();
             root_cert_store.add_trust_anchors(webpki_roots::TLS_SERVER_ROOTS.iter().map(|ta| {
                 rustls::OwnedTrustAnchor::from_subject_spki_name_constraints(
                     ta.subject,
@@ -71,15 +70,39 @@ impl ServerConnection {
                     ta.name_constraints,
                 )
             }));
-        } else {
-            // For development: accept invalid certificates
-            warn!("TLS certificate verification is disabled!");
-        }
 
-        let tls_config = rustls::ClientConfig::builder()
-            .with_safe_defaults()
-            .with_root_certificates(root_cert_store)
-            .with_no_client_auth();
+            rustls::ClientConfig::builder()
+                .with_safe_defaults()
+                .with_root_certificates(root_cert_store)
+                .with_no_client_auth()
+        } else {
+            // For development: accept all certificates
+            warn!("TLS certificate verification is disabled!");
+            
+            use rustls::{client::ServerCertVerifier, Certificate, Error, ServerName};
+            use std::time::SystemTime;
+            
+            struct DangerousVerifier;
+            
+            impl ServerCertVerifier for DangerousVerifier {
+                fn verify_server_cert(
+                    &self,
+                    _end_entity: &Certificate,
+                    _intermediates: &[Certificate],
+                    _server_name: &ServerName,
+                    _scts: &mut dyn Iterator<Item = &[u8]>,
+                    _ocsp_response: &[u8],
+                    _now: SystemTime,
+                ) -> Result<rustls::client::ServerCertVerified, Error> {
+                    Ok(rustls::client::ServerCertVerified::assertion())
+                }
+            }
+            
+            rustls::ClientConfig::builder()
+                .with_safe_defaults()
+                .with_custom_certificate_verifier(Arc::new(DangerousVerifier))
+                .with_no_client_auth()
+        };
 
         Ok(TlsConnector::from(Arc::new(tls_config)))
     }

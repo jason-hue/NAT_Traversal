@@ -100,22 +100,56 @@ cargo build --release
 
 #### 1.2 生成 TLS 证书
 
-**自签名证书（测试环境）**：
+**自签名证书（开发/测试环境）**：
 ```bash
-# Linux
-cd ~/.config/nat-traversal/
-openssl genrsa -out server.key 4096
+# 方法1: 简单自签名证书
+openssl genrsa -out server.key 2048
 openssl req -new -x509 -key server.key -out server.crt -days 365 \
-  -subj "/C=CN/ST=State/L=City/O=Organization/OU=Unit/CN=your-server.com"
+  -subj "/C=CN/ST=State/L=City/O=NAT-Traversal/CN=localhost"
 
-# Windows（在配置目录中）
-cd %APPDATA%\nat-traversal\nat-traversal\
-openssl genrsa -out server.key 4096
-openssl req -new -x509 -key server.key -out server.crt -days 365 -subj "/C=CN/ST=State/L=City/O=Organization/OU=Unit/CN=your-server.com"
+# 方法2: 包含多域名/IP的证书（推荐）
+cat > server.conf << EOF
+[req]
+distinguished_name = req_distinguished_name
+x509_extensions = v3_req
+prompt = no
+
+[req_distinguished_name]
+C = CN
+ST = State  
+L = City
+O = NAT-Traversal
+CN = localhost
+
+[v3_req]
+basicConstraints = CA:FALSE
+keyUsage = keyEncipherment, dataEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = localhost
+DNS.2 = your-server.com
+IP.1 = 127.0.0.1
+IP.2 = YOUR_SERVER_IP  # 替换为实际IP
+EOF
+
+openssl genrsa -out server.key 2048
+openssl req -new -x509 -key server.key -out server.crt -days 365 -config server.conf
 ```
 
 **生产环境证书**：
-使用 Let's Encrypt 或购买 SSL 证书，将证书文件放到配置目录。
+- 使用 Let's Encrypt：`certbot certonly --standalone -d your-domain.com`
+- 或购买 SSL 证书，将证书文件放到配置目录
+
+**证书验证**：
+```bash
+# 验证证书有效性
+openssl x509 -in server.crt -text -noout
+
+# 测试 TLS 连接
+openssl s_client -connect localhost:7000
+```
 
 #### 1.3 编辑服务器配置文件
 
@@ -198,7 +232,8 @@ token = "your-secret-token-here"  # 与服务器配置一致
 client_id = "my-desktop"       # 客户端唯一标识
 auto_reconnect = true          # 自动重连
 reconnect_interval_secs = 30   # 重连间隔
-tls_verify = true             # 验证 TLS 证书（生产环境建议开启）
+tls_verify = true              # 验证 TLS 证书（生产环境建议开启）
+                               # 开发环境使用自签名证书时设置为 false
 
 [gui]
 enabled = true                # 启用图形界面
@@ -556,6 +591,224 @@ protocol = "Tcp"
 auto_start = true
 ```
 
+## WSL + Windows 混合部署指南
+
+这是一个流行的开发场景：在 WSL 中运行服务器，在 Windows 宿主机中运行客户端。
+
+### 环境要求
+- Windows 10/11 with WSL2
+- WSL 中安装了 Rust 和编译工具
+- Windows 宿主机无需额外依赖
+
+### 快速部署步骤
+
+#### 1. WSL 服务器端设置
+
+```bash
+# 在 WSL 中获取 IP 地址
+WSL_IP=$(ip addr show eth0 | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
+echo "WSL IP: $WSL_IP"
+
+# 安装交叉编译工具
+sudo apt install gcc-mingw-w64-x86-64
+rustup target add x86_64-pc-windows-gnu
+
+# 生成服务器配置
+cargo run --bin nat-server -- --generate-config
+
+# 构建服务器
+cargo build --bin nat-server --release
+```
+
+#### 2. 配置服务器绑定到 WSL IP
+
+编辑 `~/.config/nat-traversal/server.toml`：
+```toml
+[network]
+bind_addr = "172.22.247.72"  # 替换为你的 WSL IP
+port = 7000
+max_connections = 1000
+
+[tls]
+cert_path = "/home/username/NAT_Traversal/server.crt"  # 使用绝对路径
+key_path = "/home/username/NAT_Traversal/server.key"   # 使用绝对路径
+verify_client = false
+
+[auth]
+tokens = ["secure-token-123"]  # 使用强密码
+require_auth = true
+```
+
+#### 3. 生成 WSL 兼容的证书
+
+```bash
+# 生成包含 WSL IP 的证书
+cat > server-wsl.conf << EOF
+[req]
+distinguished_name = req_distinguished_name
+x509_extensions = v3_req
+prompt = no
+
+[req_distinguished_name]
+C = US
+ST = State
+L = City
+O = NAT-Traversal
+CN = localhost
+
+[v3_req]
+basicConstraints = CA:FALSE
+keyUsage = keyEncipherment, dataEncipherment
+extendedKeyUsage = serverAuth
+subjectAltName = @alt_names
+
+[alt_names]
+DNS.1 = localhost
+IP.1 = 127.0.0.1
+IP.2 = $WSL_IP  # 你的 WSL IP
+EOF
+
+# 生成证书和密钥
+openssl genrsa -out server.key 2048
+openssl req -new -x509 -key server.key -out server.crt -days 365 -config server-wsl.conf
+```
+
+#### 4. 交叉编译 Windows 客户端
+
+```bash
+# 编译 Windows 客户端
+cargo build --target x86_64-pc-windows-gnu -p nat-traversal-client --release
+
+# 生成客户端配置
+cargo run --bin nat-client -- --generate-config
+
+# 配置客户端连接到 WSL 服务器
+sed -i "s/addr = .*/addr = \"$WSL_IP\"/" ~/.config/nat-traversal/client.toml
+sed -i 's/tls_verify = true/tls_verify = false/' ~/.config/nat-traversal/client.toml
+sed -i 's/token = "default-token"/token = "secure-token-123"/' ~/.config/nat-traversal/client.toml
+```
+
+#### 5. 部署到 Windows
+
+```bash
+# 创建部署目录
+mkdir -p /mnt/c/NAT-Traversal
+
+# 复制文件到 Windows
+cp ./target/x86_64-pc-windows-gnu/release/nat-client.exe /mnt/c/NAT-Traversal/
+cp ~/.config/nat-traversal/client.toml /mnt/c/NAT-Traversal/
+
+# 创建 Windows 批处理启动脚本
+cat > /mnt/c/NAT-Traversal/start-client.bat << 'EOF'
+@echo off
+cd /d "%~dp0"
+echo Starting NAT Traversal Client...
+nat-client.exe --config client.toml
+pause
+EOF
+
+# 创建 CLI 模式启动脚本
+cat > /mnt/c/NAT-Traversal/start-client-cli.bat << 'EOF'
+@echo off
+cd /d "%~dp0"
+echo Starting NAT Traversal Client (CLI mode)...
+nat-client.exe --config client.toml --no-gui
+pause
+EOF
+```
+
+### 运行和测试
+
+#### 启动服务器 (WSL)
+```bash
+# 前台运行（调试模式）
+./target/release/nat-server
+
+# 后台运行
+nohup ./target/release/nat-server > server.log 2>&1 &
+
+# 检查服务器状态
+ss -tlnp | grep 7000
+```
+
+#### 启动客户端 (Windows)
+```cmd
+REM 切换到部署目录
+cd C:\NAT-Traversal
+
+REM GUI 模式
+start-client.bat
+
+REM CLI 模式
+start-client-cli.bat
+
+REM 直接运行
+nat-client.exe --config client.toml
+```
+
+### 网络和防火墙配置
+
+#### WSL 端口访问
+```bash
+# WSL 默认允许 Windows 宿主机访问
+# 如果有防火墙，添加规则
+sudo ufw allow 7000/tcp
+
+# 验证端口监听
+ss -tlnp | grep 7000
+```
+
+#### Windows 防火墙 (可选)
+```cmd
+REM 如果连接失败，可能需要添加防火墙规则
+netsh advfirewall firewall add rule name="NAT Traversal Client" dir=out action=allow protocol=TCP remoteport=7000
+```
+
+### 故障排除
+
+#### 连接测试
+```bash
+# 在 WSL 中测试本地连接
+telnet localhost 7000
+
+# 在 Windows 中测试 WSL 连接
+telnet 172.22.247.72 7000
+```
+
+#### 常见问题解决
+1. **连接被拒绝**: 检查 WSL IP 是否正确，server 是否运行
+2. **TLS 握手失败**: 确保客户端配置了 `tls_verify = false`
+3. **WSL IP 变化**: 重启后 WSL IP 可能变化，需要更新配置
+
+#### 自动化脚本
+```bash
+#!/bin/bash
+# wsl-update-config.sh - 自动更新 WSL IP 配置
+
+WSL_IP=$(ip addr show eth0 | grep 'inet ' | awk '{print $2}' | cut -d'/' -f1)
+CONFIG_FILE="$HOME/.config/nat-traversal/server.toml"
+CLIENT_CONFIG="$HOME/.config/nat-traversal/client.toml"
+
+echo "Updating configuration for WSL IP: $WSL_IP"
+
+# 更新服务器配置
+sed -i "s/bind_addr = .*/bind_addr = \"$WSL_IP\"/" "$CONFIG_FILE"
+
+# 更新客户端配置
+sed -i "s/addr = .*/addr = \"$WSL_IP\"/" "$CLIENT_CONFIG"
+
+# 重新生成证书
+openssl genrsa -out server.key 2048
+openssl req -new -x509 -key server.key -out server.crt -days 365 \
+  -subj "/C=US/ST=State/L=City/O=NAT-Traversal/CN=localhost" \
+  -addext "subjectAltName=IP:127.0.0.1,IP:$WSL_IP"
+
+# 复制更新的客户端配置到 Windows
+cp "$CLIENT_CONFIG" /mnt/c/NAT-Traversal/
+
+echo "Configuration updated successfully!"
+```
+
 ## 编译和构建
 
 ### 开发环境依赖
@@ -726,7 +979,11 @@ cargo doc --open
 4. 运行 `cargo fmt` 和 `cargo clippy`
 5. 提交 Pull Request
 
-更多详细信息请参阅 [TESTING.md](TESTING.md)。
+更多详细信息请参阅：
+- **[📖 QUICKSTART.md](QUICKSTART.md)**: 5分钟快速部署指南
+- **[🚀 DEPLOYMENT.md](DEPLOYMENT.md)**: 完整部署文档（生产环境）
+- **[🔧 CLAUDE.md](CLAUDE.md)**: 开发者指南
+- **[🧪 TESTING.md](TESTING.md)**: 测试文档和验证
 
 ## 版本历史
 
