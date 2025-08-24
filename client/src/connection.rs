@@ -285,11 +285,29 @@ impl ServerConnection {
                 tunnel_id,
                 remote_port,
                 local_port,
+                protocol,
+                name,
             } => {
                 info!(
-                    "Tunnel created: {} -> {}:{}",
-                    tunnel_id, remote_port, local_port
+                    "Tunnel created: {} -> {}:{} ({})",
+                    tunnel_id, remote_port, local_port, protocol
                 );
+                
+                // Create tunnel info and add to client's tunnel list
+                let tunnel_info = TunnelInfo {
+                    id: tunnel_id,
+                    name,
+                    protocol,
+                    local_port,
+                    remote_port,
+                    created_at: Utc::now(),
+                    bytes_sent: 0,
+                    bytes_received: 0,
+                    active_connections: 0,
+                };
+                
+                let mut tunnels_guard = tunnels.write().await;
+                tunnels_guard.insert(tunnel_id, tunnel_info);
                 // TODO: Start local proxy for this tunnel
             }
 

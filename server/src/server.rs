@@ -315,6 +315,8 @@ impl NatServer {
                         tunnel_id: tunnel_info.id,
                         remote_port: tunnel_info.remote_port,
                         local_port: tunnel_info.local_port,
+                        protocol: tunnel_info.protocol,
+                        name: tunnel_info.name.clone(),
                     };
 
                     tx.send(response)
