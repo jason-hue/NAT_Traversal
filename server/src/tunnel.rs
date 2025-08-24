@@ -59,6 +59,7 @@ impl PortAllocator {
                 && port <= self.port_range.1
                 && !self.allocated_ports.contains_key(&port)
             {
+                self.allocated_ports.insert(port, Uuid::nil()); // Temporary placeholder
                 return Some(port);
             }
         }
@@ -89,13 +90,6 @@ impl PortAllocator {
         None
     }
 
-    pub fn reserve_port(&mut self, port: u16, tunnel_id: Uuid) -> bool {
-        if self.allocated_ports.contains_key(&port) {
-            return false;
-        }
-        self.allocated_ports.insert(port, tunnel_id);
-        true
-    }
 
     pub fn release_port(&mut self, port: u16) -> bool {
         self.allocated_ports.remove(&port).is_some()
@@ -127,9 +121,8 @@ impl TunnelManager {
             .allocate_port(remote_port)
             .ok_or_else(|| NatError::tunnel("No available ports"))?;
 
-        if !allocator.reserve_port(assigned_port, tunnel_id) {
-            return Err(NatError::tunnel("Port already in use"));
-        }
+        // Update the reservation with the actual tunnel ID
+        allocator.allocated_ports.insert(assigned_port, tunnel_id);
         drop(allocator);
 
         // Create tunnel info

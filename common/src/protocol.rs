@@ -36,6 +36,8 @@ pub enum Message {
         tunnel_id: Uuid,
         remote_port: u16,
         local_port: u16,
+        protocol: TunnelProtocol,
+        name: Option<String>,
     },
 
     /// Close an existing tunnel
