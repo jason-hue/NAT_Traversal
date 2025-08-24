@@ -43,6 +43,7 @@ pub struct ServerConnection {
     stats: Arc<RwLock<ConnectionStats>>,
     message_sender: Arc<Mutex<Option<mpsc::UnboundedSender<Message>>>>,
     tls_connector: TlsConnector,
+    pending_tunnels: Arc<RwLock<HashMap<Uuid, (String, TunnelProtocol)>>>,
 }
 
 impl ServerConnection {
@@ -56,6 +57,7 @@ impl ServerConnection {
             stats: Arc::new(RwLock::new(ConnectionStats::default())),
             message_sender: Arc::new(Mutex::new(None)),
             tls_connector,
+            pending_tunnels: Arc::new(RwLock::new(HashMap::new())),
         })
     }
 
@@ -110,7 +112,13 @@ impl ServerConnection {
     pub async fn connect(&self) -> NatResult<()> {
         self.set_state(ConnectionState::Connecting).await;
 
-        let server_addr = format!("{}:{}", self.config.server.addr, self.config.server.port);
+        // Trim whitespace from server address and validate
+        let server_addr_clean = self.config.server.addr.trim();
+        if server_addr_clean.is_empty() {
+            return Err(NatError::config("Server address cannot be empty"));
+        }
+
+        let server_addr = format!("{}:{}", server_addr_clean, self.config.server.port);
 
         // Connect to server
         let tcp_stream = TcpStream::connect(&server_addr).await.map_err(|e| {
@@ -118,8 +126,8 @@ impl ServerConnection {
         })?;
 
         // Perform TLS handshake
-        let server_name = rustls::ServerName::try_from(self.config.server.addr.as_str())
-            .map_err(|e| NatError::tls(format!("Invalid server name: {}", e)))?;
+        let server_name = rustls::ServerName::try_from(server_addr_clean)
+            .map_err(|e| NatError::tls(format!("Invalid server name '{}': {}", server_addr_clean, e)))?;
 
         let tls_stream = self
             .tls_connector
@@ -146,7 +154,8 @@ impl ServerConnection {
             let state = self.state.clone();
             let tunnels = self.tunnels.clone();
             let stats = self.stats.clone();
-            tokio::spawn(async move { Self::handle_read(read_half, state, tunnels, stats).await })
+            let pending_tunnels = self.pending_tunnels.clone();
+            tokio::spawn(async move { Self::handle_read(read_half, state, tunnels, stats, pending_tunnels).await })
         };
 
         // Authenticate
@@ -215,6 +224,7 @@ impl ServerConnection {
         state: Arc<RwLock<ConnectionState>>,
         tunnels: Arc<RwLock<HashMap<Uuid, TunnelInfo>>>,
         stats: Arc<RwLock<ConnectionStats>>,
+        pending_tunnels: Arc<RwLock<HashMap<Uuid, (String, TunnelProtocol)>>>,
     ) -> NatResult<()> {
         use tokio::io::AsyncReadExt;
 
@@ -254,7 +264,7 @@ impl ServerConnection {
             };
 
             // Handle message
-            Self::handle_message(message, &state, &tunnels).await;
+            Self::handle_message(message, &state, &tunnels, &pending_tunnels).await;
         }
 
         Ok(())
@@ -264,6 +274,7 @@ impl ServerConnection {
         message: Message,
         state: &Arc<RwLock<ConnectionState>>,
         tunnels: &Arc<RwLock<HashMap<Uuid, TunnelInfo>>>,
+        pending_tunnels: &Arc<RwLock<HashMap<Uuid, (String, TunnelProtocol)>>>,
     ) {
         match message {
             Message::AuthResponse {
@@ -290,6 +301,38 @@ impl ServerConnection {
                     "Tunnel created: {} -> {}:{}",
                     tunnel_id, remote_port, local_port
                 );
+                
+                // Get the first pending tunnel info (since we don't have request ID in response)
+                let (tunnel_name, tunnel_protocol) = {
+                    let mut pending = pending_tunnels.write().await;
+                    if let Some(key) = pending.keys().next().cloned() {
+                        let value = pending.remove(&key).unwrap();
+                        value
+                    } else {
+                        // Fallback values if no pending request found
+                        (format!("Tunnel {}", local_port), TunnelProtocol::Tcp)
+                    }
+                };
+                
+                // Create and store tunnel info
+                let tunnel_info = TunnelInfo {
+                    id: tunnel_id,
+                    name: Some(tunnel_name.clone()),
+                    protocol: tunnel_protocol,
+                    local_port,
+                    remote_port,
+                    created_at: Utc::now(),
+                    bytes_sent: 0,
+                    bytes_received: 0,
+                    active_connections: 0,
+                };
+                
+                let mut tunnels_guard = tunnels.write().await;
+                tunnels_guard.insert(tunnel_id, tunnel_info.clone());
+                drop(tunnels_guard);
+                
+                info!("Tunnel created successfully: {} -> {}:{}", tunnel_name, remote_port, local_port);
+                
                 // TODO: Start local proxy for this tunnel
             }
 
@@ -373,6 +416,14 @@ impl ServerConnection {
         protocol: TunnelProtocol,
         name: Option<String>,
     ) -> NatResult<()> {
+        let tunnel_name = name.as_ref().cloned().unwrap_or_else(|| format!("Tunnel {}", local_port));
+        
+        // Store the pending tunnel info
+        {
+            let mut pending = self.pending_tunnels.write().await;
+            pending.insert(Uuid::new_v4(), (tunnel_name.clone(), protocol));
+        }
+
         let message = Message::CreateTunnel {
             local_port,
             remote_port,

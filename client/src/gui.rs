@@ -21,6 +21,10 @@ pub struct NatClientApp {
     settings_window: bool,
     about_window: bool,
 
+    // Status messages
+    status_message: String,
+    status_message_time: std::time::Instant,
+
     // Async state management
     state_receiver: Option<mpsc::UnboundedReceiver<AppState>>,
     state_sender: Option<mpsc::UnboundedSender<AppState>>,
@@ -52,6 +56,8 @@ impl Default for NatClientApp {
             new_tunnel_form: NewTunnelForm::default(),
             settings_window: false,
             about_window: false,
+            status_message: String::new(),
+            status_message_time: std::time::Instant::now(),
             state_receiver: Some(state_receiver),
             state_sender: Some(state_sender),
         }
@@ -113,6 +119,21 @@ impl NatClientApp {
                     tracing::error!("Failed to stop client: {}", e);
                 }
             });
+        }
+    }
+
+    fn set_status_message(&mut self, message: String) {
+        self.status_message = message;
+        self.status_message_time = std::time::Instant::now();
+    }
+
+    fn get_status_color(&self) -> egui::Color32 {
+        if self.status_message.contains("error") || self.status_message.contains("failed") {
+            egui::Color32::RED
+        } else if self.status_message.contains("success") || self.status_message.contains("created") {
+            egui::Color32::GREEN
+        } else {
+            egui::Color32::WHITE
         }
     }
 
@@ -263,12 +284,62 @@ impl eframe::App for NatClientApp {
 
             ui.horizontal(|ui| {
                 ui.label("Local Port:");
-                ui.text_edit_singleline(&mut self.new_tunnel_form.local_port);
+                let port_edit = ui.text_edit_singleline(&mut self.new_tunnel_form.local_port);
+                
+                // Validate port number
+                if !self.new_tunnel_form.local_port.is_empty() {
+                    match self.new_tunnel_form.local_port.parse::<u16>() {
+                        Ok(port) => {
+                            if port == 0 {
+                                ui.colored_label(egui::Color32::RED, "Port cannot be 0");
+                            }
+                        }
+                        Err(_) => {
+                            ui.colored_label(egui::Color32::RED, "Invalid port");
+                        }
+                    }
+                } else {
+                    ui.colored_label(egui::Color32::RED, "Port required");
+                }
+                
+                if port_edit.changed() {
+                    // Remove any non-numeric characters
+                    self.new_tunnel_form.local_port = self.new_tunnel_form.local_port
+                        .chars()
+                        .filter(|c| c.is_numeric())
+                        .collect();
+                }
             });
 
             ui.horizontal(|ui| {
                 ui.label("Remote Port:");
-                ui.text_edit_singleline(&mut self.new_tunnel_form.remote_port);
+                let port_edit = ui.text_edit_singleline(&mut self.new_tunnel_form.remote_port);
+                
+                // Validate port number (optional)
+                if !self.new_tunnel_form.remote_port.is_empty() {
+                    match self.new_tunnel_form.remote_port.parse::<u16>() {
+                        Ok(port) => {
+                            if port == 0 {
+                                ui.colored_label(egui::Color32::RED, "Port cannot be 0");
+                            } else if port < 1024 {
+                                ui.colored_label(egui::Color32::YELLOW, "Privileged port");
+                            }
+                        }
+                        Err(_) => {
+                            ui.colored_label(egui::Color32::RED, "Invalid port");
+                        }
+                    }
+                } else {
+                    ui.label("Optional - auto-assign");
+                }
+                
+                if port_edit.changed() {
+                    // Remove any non-numeric characters
+                    self.new_tunnel_form.remote_port = self.new_tunnel_form.remote_port
+                        .chars()
+                        .filter(|c| c.is_numeric())
+                        .collect();
+                }
             });
 
             ui.horizontal(|ui| {
@@ -286,37 +357,101 @@ impl eframe::App for NatClientApp {
             });
 
             if ui.button("Create Tunnel").clicked() {
-                if let (Ok(local_port), Some(client)) =
-                    (self.new_tunnel_form.local_port.parse::<u16>(), &self.client)
-                {
-                    let remote_port = if self.new_tunnel_form.remote_port.is_empty() {
-                        None
-                    } else {
-                        self.new_tunnel_form.remote_port.parse().ok()
-                    };
+                // Validate inputs
+                let local_port_result = self.new_tunnel_form.local_port.parse::<u16>();
+                let remote_port_result = if self.new_tunnel_form.remote_port.is_empty() {
+                    Ok(None)
+                } else {
+                    self.new_tunnel_form.remote_port.parse::<u16>().map(Some)
+                };
 
-                    let name = if self.new_tunnel_form.name.is_empty() {
-                        None
-                    } else {
-                        Some(self.new_tunnel_form.name.clone())
-                    };
+                match (local_port_result, remote_port_result) {
+                    (Ok(local_port), Ok(remote_port)) => {
+                        if local_port == 0 {
+                            self.set_status_message("Error: Local port cannot be 0".to_string());
+                        } else if let Some(remote_port) = remote_port {
+                            if remote_port == 0 {
+                                self.set_status_message("Error: Remote port cannot be 0".to_string());
+                            } else if let Some(client) = &self.client {
+                                let name = if self.new_tunnel_form.name.is_empty() {
+                                    None
+                                } else {
+                                    Some(self.new_tunnel_form.name.clone())
+                                };
 
-                    let client = client.clone();
-                    let protocol = self.new_tunnel_form.protocol;
+                                let client = client.clone();
+                                let protocol = self.new_tunnel_form.protocol;
+                                let tunnel_name = name.clone().unwrap_or_else(|| format!("Tunnel {}", local_port));
 
-                    tokio::spawn(async move {
-                        if let Err(e) = client
-                            .create_tunnel(local_port, remote_port, protocol, name)
-                            .await
-                        {
-                            tracing::error!("Failed to create tunnel: {}", e);
+                                tokio::spawn(async move {
+                                    match client.create_tunnel(local_port, Some(remote_port), protocol, name).await {
+                                        Ok(_) => {
+                                            // Success message will be shown when tunnel is created
+                                        }
+                                        Err(e) => {
+                                            tracing::error!("Failed to create tunnel: {}", e);
+                                        }
+                                    }
+                                });
+
+                                self.set_status_message(format!("Creating tunnel {}...", tunnel_name));
+                                // Clear form
+                                self.new_tunnel_form = NewTunnelForm::default();
+                            } else {
+                                self.set_status_message("Error: Not connected to server".to_string());
+                            }
+                        } else if let Some(client) = &self.client {
+                            let name = if self.new_tunnel_form.name.is_empty() {
+                                None
+                            } else {
+                                Some(self.new_tunnel_form.name.clone())
+                            };
+
+                            let client = client.clone();
+                            let protocol = self.new_tunnel_form.protocol;
+                            let tunnel_name = name.clone().unwrap_or_else(|| format!("Tunnel {}", local_port));
+
+                            tokio::spawn(async move {
+                                match client.create_tunnel(local_port, None, protocol, name).await {
+                                    Ok(_) => {
+                                        // Success message will be shown when tunnel is created
+                                    }
+                                    Err(e) => {
+                                        tracing::error!("Failed to create tunnel: {}", e);
+                                    }
+                                }
+                            });
+
+                            self.set_status_message(format!("Creating tunnel {}...", tunnel_name));
+                            // Clear form
+                            self.new_tunnel_form = NewTunnelForm::default();
+                        } else {
+                            self.set_status_message("Error: Not connected to server".to_string());
                         }
-                    });
-
-                    // Clear form
-                    self.new_tunnel_form = NewTunnelForm::default();
+                    }
+                    (Err(_), _) => {
+                        self.set_status_message("Error: Invalid local port".to_string());
+                    }
+                    (_, Err(_)) => {
+                        self.set_status_message("Error: Invalid remote port".to_string());
+                    }
                 }
             }
+
+        // Status message display
+        if !self.status_message.is_empty() {
+            // Hide status message after 5 seconds
+            if self.status_message_time.elapsed().as_secs() < 5 {
+                ui.horizontal(|ui| {
+                    ui.colored_label(self.get_status_color(), &self.status_message);
+                    if ui.button("×").clicked() {
+                        self.status_message.clear();
+                    }
+                });
+            } else {
+                self.status_message.clear();
+            }
+        }
         });
 
         // Settings window
@@ -329,7 +464,26 @@ impl eframe::App for NatClientApp {
 
                     ui.horizontal(|ui| {
                         ui.label("Server Address:");
-                        ui.text_edit_singleline(&mut self.config.server.addr);
+                        let address_edit = ui.text_edit_singleline(&mut self.config.server.addr);
+                        
+                        // Show validation feedback
+                        let addr_trimmed = self.config.server.addr.trim();
+                        if !addr_trimmed.is_empty() {
+                            // Basic IP address or hostname validation
+                            let is_valid = addr_trimmed.chars().all(|c| 
+                                c.is_alphanumeric() || c == '.' || c == '-' || c == ':'
+                            );
+                            if !is_valid {
+                                ui.colored_label(egui::Color32::RED, "Invalid address");
+                            }
+                        } else {
+                            ui.colored_label(egui::Color32::RED, "Address required");
+                        }
+                        
+                        if address_edit.changed() {
+                            // Auto-trim on change
+                            self.config.server.addr = self.config.server.addr.trim().to_string();
+                        }
                     });
 
                     ui.horizontal(|ui| {

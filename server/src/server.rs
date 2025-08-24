@@ -32,7 +32,7 @@ impl NatServer {
         // Create tunnel manager
         let tunnel_manager = Arc::new(TunnelManager::new(
             connection_manager.clone(),
-            (8000, 9000), // Port range for tunnels
+            config.limits.tunnel_port_range,
         ));
 
         Ok(Self {

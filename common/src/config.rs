@@ -53,6 +53,7 @@ pub struct LimitsConfig {
     pub max_bandwidth_mbps: Option<u32>,
     pub max_connections_per_tunnel: u32,
     pub connection_timeout_secs: u64,
+    pub tunnel_port_range: (u16, u16),
 }
 
 /// Logging configuration
@@ -119,6 +120,7 @@ impl Default for ServerConfig {
                 max_bandwidth_mbps: None,
                 max_connections_per_tunnel: 100,
                 connection_timeout_secs: 300,
+                tunnel_port_range: (1024, 65535),
             },
             logging: LoggingConfig {
                 level: "info".to_string(),
